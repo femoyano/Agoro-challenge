@@ -85,11 +85,11 @@ Given the available time and data, Method 3 (*Stratification by a map of predict
 
 **Sampling variance**  
 V(x_bar) = SUM(h=1 -> H) { (N_h / N)^2 S_h^2 / n_h }  
-x_bar: mean of x
+x_bar: mean of x  
 H: number of strata  
 N_h: size (number of grid points) of stratum h  
-N: total size (sum of all strata)
-S_h: standard deviation of z in stratum h  
+N: total size (sum of all strata)  
+S_h: standard deviation of x in stratum h  
 n_h: sample size allocated to stratum h  
 
 **Confidence Interval (CI)**  

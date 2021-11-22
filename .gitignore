@@ -6,3 +6,4 @@ data
 *.pdf
 *.html
 *.pptx*
+.idea
