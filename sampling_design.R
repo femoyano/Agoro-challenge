@@ -6,12 +6,12 @@ library(tidyverse)
 
 # Definitions and settings
 conf_lev   <- 0.95  # confidence level required
-max_ci     <- 0.15  # maximum allowed confidence interval as proportion of the mean
-n_mps      <- 10    # minimum number of sampling points allowed per strata
+max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
+n_mps      <- 3     # minimum number of sampling points allowed per strata
 min_strata <- 2     # minimum number of strata
 max_strata <- 100   # maximum number of strata
 max_n      <- 1000  # maximum number of total samples
-sample_inc <- 5     # sample number increment per iteration. For large grids (e.g. Iowa) larger value can save processing time.
+sample_inc <- 1     # sample number increment per iteration. For large grids (e.g. Iowa) larger value can save processing time.
 
 # Required functions
 get_km_clust <- function(d, c) {
@@ -29,26 +29,29 @@ get_stratstats <- function(df) {
     drop_na(S)
 }
 
-get_sampvariance <- function(H, N_H, N, S_H, n_H) {
+get_sampvar <- function(H, N_H, N, S_H, n_H) {
   # Function returns the sampling variance for a stratified design
-  # H: scalar for number of strata
+  # H: scalar for number (of strata
   # N_H: vector size H of size (number of grid points) of stratum h
   # N: scalar for total grid points (sum of all strata) 
   # S_H: vector size H of standard deviation in each stratum
   # n_H: vector size H of sample size allocated to stratum h
   sampvar <- 0
   for(i in 1:H) {
-    v_h <- (N_H[i]/N)^2 * S_H[i]^2 / n_H[i]
+    v_h <- (N_H[i]/N)^2 * (S_H[i])^2 / n_H[i]
     sampvar <- sampvar+v_h
   }
   return(sampvar)
 }
 
-get_confint <- function(conf_lev, sampvar, n_tot) {
-  # Two-sided confidence interval calculation
-  z <- qnorm(1-(1-conf_lev)/2)  # use of the Z value assumes a large enough number of samples (> 30)
-  se <- sqrt(sampvar) / sqrt(n_tot) # standard error
-  ci <- z * se * 2  # Multiplied by 2 to get the full interval length
+get_sampvar2 <- function(H, N_H, N, S_H, n_H) {
+  # Same as get_sampvar but with a finite population correction term (not significant in this case)
+  sampvar <- 0
+  for(i in 1:H) {
+    v_h <- (N_H[i]/N)^2 * ((N_H[i] - n_H[i]) / N_H[i]) * ((S_H[i])^2 / n_H[i])
+    sampvar <- sampvar+v_h
+  }
+  return(sampvar)
 }
 
 get_optsampalloc <- function(H, N_H, S_H, n_tot) {
@@ -62,13 +65,19 @@ get_optsampalloc <- function(H, N_H, S_H, n_tot) {
     x <- N_H[i] * S_H[i]
     sum_sdn <- sum_sdn + x
   }
-  opt_H <- rep(NA, length = H)  # vector to hold outputs
+  opt_n <- rep(NA, length = H)  # vector to hold outputs
   for(i in 1:H) {
-    opt_H[i] <- n_tot * (N_H[i] * S_H[i]) / sum_sdn
+    opt_n[i] <- n_tot * (N_H[i] * S_H[i]) / sum_sdn
   }
-  return(as.integer(opt_H))
+  return(as.integer(round(opt_n)))
 }
 
+get_confint <- function(conf_lev, sampvar, n_tot) {
+  # Two-sided confidence interval calculation
+  z <- qnorm(1-(1-conf_lev)/2)  # use of the Z value assumes a large enough number of samples (> 30)
+  se <- sqrt(sampvar) / sqrt(n_tot) # standard error
+  ci <- z * se * 2  # Multiplied by 2 to get the full interval length
+}
 
 optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_strata, sample_inc) {
   # This function obtains the minimum amount of total samples necessary to attain the value of max_ci
@@ -82,53 +91,81 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_strata, sample_i
   nstrata_opt <- NA  # Optimal number of strata
   nstrata     <- NA  # Number of strata
   n_tot       <- NA  # Number of total samples
-  rci         <- NA  # Confidence interval relative to the mean
+  cif         <- NA  # Confidence interval as fraction of the mean
   ocs_avg     <- mean(ocs_pr$ocs_m, na.rm = TRUE)
+  N           <- length(!is.na(ocs_pr$ocs_m))
   
   iter1 <- 1 
   
   while(TRUE) {
     
     if(iter1==1) {nstrata <- min_strata} else {nstrata <- nstrata+1}
+    if(nstrata > max_strata) {
+      cat(paste("Reached maximum number of allowed strata:", strata))
+      break
+    }
     
     # Create strata
     clust <- get_km_clust(d = ocs_pr$ocs_m, c = nstrata)
-    ocs_df$stratum[which(!is.na(ocs_df$ocs_m))] <- as.integer(clust$cluster)
+    ocs_pr$stratum[which(!is.na(ocs_pr$ocs_m))] <- as.integer(clust$cluster)
     
     # Get statistics for each stratum
-    str_stats <- get_stratstats(ocs_df)
+    str_stats <- get_stratstats(ocs_pr)
     
     iter2 <- 1
+    target_reached <- FALSE
     
     while(TRUE) {
       
       # Calculate the total sampling size
       if(iter2==1) {n_tot <- n_mps * nstrata} else {n_tot <- n_tot + sample_inc}
+      if(n_tot > max_n) {
+        cat(paste0("Reached maximum number of allowed samples at stratum: ", nstrata))
+        break
+      }
       
       # Get the optimal allocation
-      opt_alloc <- get_optsampalloc(H = nstrata, N_H = str_stats$N, S_H = str_stats$S, n_tot = n_tot)
+      opt_n <- get_optsampalloc(H = nstrata, N_H = str_stats$N, S_H = str_stats$S, n_tot = n_tot)
+      if(any(opt_n < n_mps)) { # if we don't get the minimum n per stratum, skip to next iteration
+        iter2 <- iter2+1
+        next
+        }  
+      str_stats$opt_n <- opt_n
+      n_tot <- sum(str_stats$opt_n)  #redefine in case of rounding differences
       
-      if(any(opt_alloc < n_mps)) next  # if we don't get the minimum n per stratum, skip to next iteration
+      # Get the overall sampling variance as a function of stratified sampling
+      samp_var <- get_sampvar2(H = nstrata, N_H = str_stats$N, N = N, S_H = str_stats$S, n_H = str_stats$opt_n)
       
+      # Get confidence interval
+      ci <- get_confint(conf_lev = conf_lev, sampvar = samp_var, n_tot = n_tot)
+      cif <- ci / ocs_avg
       
-      
-      if(n >= max_n) {
-        print(paste("Reached maximum number of allowed samples at stratum", nstrata))
+      # Check if cif is same or lower than the maximum allowed confidence interval
+      if(cif <= max_cif) {
+        target_reached <- TRUE
         break
-        }
-        
+      }
+      
       iter2 <- iter2+1
     }
     
-    if(strata == max_strata) {
-      print(paste("Reached maximum number of allowed strata:", strata))
-      break
+    if(target_reached) {
+      n_opt <- n_tot
+      nstrata_opt <- nstrata
+      
+      cat(" Confidence interval equal or less than the target (" ,  max_cif * 100, ") was found.\n")
+      cat(" CI = ", ci, "\n",
+          "CIrel = ", cif * 100, "%\n",
+          "Mean SOC stocks = ", ocs_avg, "\n",
+          "Total strata = ", nstrata, "\n",
+          "Total samples = ", n_tot, "\n",
+          "Samples per strata = ", str_stats$opt_n, "\n"
+          )
+      return(list(ocs_out = ocs_pr, str_stats = str_stats))
     }
     iter1 <- iter1+1
   }
-  
-  strat_dat <- data.frame(stratum = , n = )
-  return(list(ocs_pr, strat_dat))
+
 }
 
 
@@ -144,13 +181,4 @@ ocs_df <- data.frame(ocs_m = getValues(ocs_r), stratum = NA)  # add a variable t
 # Call the sampling optimization function
 samp_opt <- optim_sampling(ocs_pr = ocs_df, conf_lev = conf_lev, max_ci = max_ci,
                            n_mps = n_mps, min_strata = min_strata, sample_inc = sample_inc)
-
-
-# Transform back into raster
-ocskm_r <-raster(ocs_r)
-values(ocskm_r) <- ocs_df$ocs_clus
-# mycolor <- c("#fef65b","#ff0000", "#daa520","#0000ff","#0000ff","#00ff00","#cbbeb5",
-             # "#c3ff5b", "#ff7373", "#00ff00", "#808080")
-mycolor <- rainbow(5)
-plot(ocskm_r, col = mycolor)
 
