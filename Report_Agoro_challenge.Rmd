@@ -1,0 +1,127 @@
+---
+title: "Agoro coding challenge"
+output: html_notebook
+---
+
+## Introduction
+
+This is an R-notebook written for the Agoro coding challenge. It includes all the related R scripts as well as documentation on each step.  
+
+The objective of the challenge is _to develop and document an optimal sampling strategy to obtain the mean SOC content for all cropland in Iowa, with a 95% confidence interval being smaller or equal to 15% of the mean._
+
+An optimized sampling strategy needs to take into account the heterogeneity of the area being measured, specifically in terms of SOC content. SOC itself or variables known to correlate with SOC can be used to characterize this heterogeneity.
+
+At this point I make the assumption that we are interested in the top soil only. Subsoil changes in SOC are disregarded.
+
+The provided paper by Gruijter et al. 2016 will be used as basis to develop the approach. The study uses a map of C content with associated uncertainty to optimize:
+
+* number of strata 
+* stratum boundaries
+* total sampling size
+* within strata sampling size
+
+The optimization maximizes an expected profit taking into account:
+
+* sequestered C price
+* sampling costs
+* a trading parameter that balances farmer's and buyer's risks due to uncertainty in C sequestered
+
+
+## Deliverables
+
+* A presentation of your approach, highlighting key steps and decision made (few slides)
+* A script supporting your approach 
+* A map of the designed sampling plan
+* The final sampling density 
+* A description of what your next steps would be, if you had more time/resources to refine your approach
+
+
+## Data
+
+Provided:  
+
+* Köppen-Geiger climate classification for the period 1988-2017. World coverage.
+* Crop mask: cultivated area for 2020 (very large .img file) (https://nassgeodata.gmu.edu/CropScape/)
+* Terrain: elevation (DEM) and wetness. Only pointer to online resource
+* Soil: soilgrid data for clay and SOC. 250m scale
+
+Other obtained:  
+
+* Crop Data Layer in .tif format only for Iowa 2020 (https://nassgeodata.gmu.edu/CropScape/)
+
+
+## Methods
+
+We define the objective-related variables:
+
+* Target universe: all cropland area in Iowa
+* Target variable: soil organic carbon (SOC) (define to what depth after looking at data)
+* Target parameter: change in SOC x years after change from conventional to no till
+
+A design-based sampling approach is used. Specifically we will use a Stratified Simple Random Sampling (StSRS). The entire area is divided into strata with simple random sampling applied in each.
+
+As per discussed in Gruijter et al. 2016, bulking of soil samples is excluded. In particular, this method impedes a proper calculation of optimal sampling numbers across strata.
+
+
+### Stratification method
+
+The following approaches can be taken to stratify the area of interest:
+
+1. *Compact geographical stratification*  
+This method is only useful if there is no data available for the region. This is not our case.
+
+2. *Stratification by ancillary variables*
+This method is useful of we have related ancillary data but not estimates of the target variable itself. In our case, we have SOC estimates from SoilGrids250m (soilgrids.org).
+
+3. *Stratification by a map of predictions*
+This method improves over the previous option, as it already provides the 'best estimate' of SOC content distribution in the area. However, it does not take into account prediction uncertainties.
+
+4. *Stratification by a map of predictions with uncertainties*
+This method is ideal as it takes uncertainties in predictions into account. However, we currently do not have the uncertainty data. This option can be explored given more time.
+
+Given the available time and data, Method 3 (*Stratification by a map of predictions*) is chosen in this first approach.
+
+### Definition of some useful formulas
+
+**Sampling variance**  
+V(x_bar) = SUM(h=1 -> H) { (N_h / N)^2 S_h^2 / n_h }  
+x_bar: mean of x
+H: number of strata  
+N_h: size (number of grid points) of stratum h  
+N: total size (sum of all strata)
+S_h: standard deviation of z in stratum h  
+n_h: sample size allocated to stratum h  
+
+**Confidence Interval (CI)**  
+x_bar +- Z(S / sqrt(n))  
+Z: Z-value (= 1.96 for 95% CI)  
+or use t-scores for small sample sizes
+
+**Optimal sample size for stratum h**
+n'_h = n * (N_h * S_h) / (SUM(h=1 -> H) {N_h * S_h})
+
+**Change in time in variable x**
+x_bar_delta = x_bar_t2 - x_bar_t1
+
+**Variance of estimated difference**
+V(x_bar_delta) = V(x_bar_t2 - x_bar_t1)  
+               = V(x_bar_t1) + V(x_bar_t2) - 2 * rho * sqrt( V(x_bar_t1) * V(x_bar_t2) )  
+Re-sampling at the same points is not recommended (Gruijter et al. 2016). With different points there is no temporal auto-correlation, so the term rho becomes zero:  
+V(x_bar_delta) = V(x_bar_t1) + V(x_bar_t2)  
+
+
+## Step by step procedure
+
+### Area delimitation and subset relevant data
+
+The area of interest is the entire cropped surface of Iowa. To test the method, a subset of this area will be used and the method applied to the entire area when ready
+
+We first read in the data, subset and make some quick quality checks
+```{r}
+
+```
+
+
+
+
+
