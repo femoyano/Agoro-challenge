@@ -5,7 +5,7 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 
-# Subset cropped areas
+# Subset cropped areas ---
 crop_file <- 'data/crop_mask/CDL_2020_19/CDL_2020_19.tif'
 # GDALinfo(crop_file)
 crop <- rast(crop_file)
@@ -13,6 +13,7 @@ cr_vals <- values(crop)
 cr_uni <- unique(cr_vals)
 rm(cr_vals)
 
+# Codes for land use obtained from https://www.nass.usda.gov/Research_and_Science/Cropland/metadata/metadata_ia20.htm
 notcrop <- c(0, 7, 8, 9, 15, 16, 17, 18, 19, 20, 40, 62, 63, 64, 65,
              73, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
              91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
@@ -46,25 +47,38 @@ crop[crop %in% cr_no] <- 0
 # plot(crop)
 # writeRaster(crop, 'cropland-iowa.tif')
 
-# Now we use the new crop raster to mask the ocs raster
 
-# First we read in the ocs data (Subset to Iowa was done in QGIS)
-ocs_file <- 'data/soil/soilgrid_ocs_mean_iowa_crs-aea.tif'
-GDALinfo(ocs_file)
+# Now we use the new crop raster to mask the ocs raster -----------
+
+# First we read in the ocs mean and error data (Subset to Iowa was done in QGIS)
+ocs_file <- 'data/workfiles/soilgrid_ocs_mean_iowa_crs-aea.tif'
 ocs <- rast(ocs_file)
-ocs
-plot(ocs)
-hist(ocs)
+# GDALinfo(ocs_file)
+# plot(ocs)
+# hist(ocs)
 
-# Second we need to change the resolution to match ocs data
+ocserr_file <- 'data/workfiles/Iowa_ocs_0-30_Q0.05.tif'
+ocserr <- rast(ocserr_file)
+# GDALinfo(ocserr_file)
+# hist(ocserr)
+# plot(ocserr)
+
+
+# Second we need to change the resolution to match ocs data and subset the ocs data using the crop mask
 crop2 <- resample(crop, ocs, method='near')
-
-# Third, we subset the ocs data using the crop mask
 ocs2 <- mask(x = ocs, mask = crop2, maskvalue=0)
 
-# Fouth, we create an aggregated (low res) version for testing puposes
+crop2 <- resample(crop, ocserr, method='near')
+ocserr2 <- mask(x = ocserr, mask = crop2, maskvalue=0)
+
+# Lets convert 0.05 percentile to standard deviation assuming a normal distribution of the error:
+ocserr2 <- resample(ocserr2, ocs2, method='near')
+ocssd2 <- (ocserr2-ocs2)/(-1.645)  #  -1.645 value of Z at 005 percentile
+
+# We can create an aggregated (low res) version for testing purposes
 ocs3 <- aggregate(ocs2, fact=10, fun="mean", na.rm=TRUE, cores=2)
 plot(ocs3)
+
 # Fifth, we write out to file
 writeRaster(ocs2, 'data/workfiles/ocs_mean_iowa_onlycrop.tif')
 writeRaster(ocs3, 'data/workfiles/ocs_mean_iowa_onlycrop_agg.tif')

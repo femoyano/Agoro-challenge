@@ -5,12 +5,28 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 
-# tif_file <- 'data/climate/1988_2017/kc_1988_2017.tif'
+tif_file <- 'data/workfiles/soilgrids_ocs_uncertainty_central-iowa.tif'
+GDALinfo(tif_file)
+tif <- raster(tif_file)
+hist(tif)
+plot(tif)
+tif2 <- reclassify(tif, cbind(5000, 50000, NA))
+hist(tif2)
+plot(tif2)
+summary(values(tif2))
+
+ocs_file <- 'data/workfiles/soilgrid_ocs_mean_iowa_crs-aea.tif'
+GDALinfo(ocs_file)
+ocs <- raster(ocs_file)
+ocs
+plot(ocs)
+hist(ocs)
 
 ocs_file <- 'data/soil/soilgrid_ocs_mean.tif'
 GDALinfo(ocs_file)
 ocs <- raster(ocs_file)
 ocs
+plot(ocs)
 
 crop_file <- 'data/crop_mask/CDL_2020_19/CDL_2020_19.tif'
 # GDALinfo(crop_file)
