@@ -8,9 +8,10 @@ library(tidyverse)
 test_id     <- "test2"
 ocs_file    <- 'data/workfiles/soilgrids_ocs_mean_iowa.tif'
 ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
+use_prederr <- TRUE
 
 conf_lev   <- 0.95  # confidence level required
-max_cif    <- 0.05  # maximum allowed confidence interval as fraction of the mean
+max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
 min_H      <- 1     # minimum number of strata
 max_H      <- 10    # number of strata to test
@@ -30,17 +31,18 @@ get_km_clust <- function(d, c) {
 get_stratstats <- function(df) {
   df_out <- df %>%
     group_by(stratum) %>%
-    summarize(stratum = mean(stratum), stratum_sd = sd(ocs_m), stratum_var = sd(ocs_m)^2, stratum_size = length(ocs_m)) %>%
+    summarize(stratum = mean(stratum), stratum_sd = sd(ocs_m), stratum_var = sd(ocs_m)^2,
+              stratum_size = length(ocs_m), stratum_errsd = mean(ocs_sd)) %>%
     drop_na(stratum_sd)
 }
 
 get_sampvar <- function(H, N_H, N, S_H, n_H) {
   # Function returns the sampling variance for a stratified design
   # H: scalar for number of strata
-  # N_H: vector size H of size (number of grid points) of stratum h
+  # N_H: vector of stratum sizes (number of grid points)
   # N: scalar for total grid points (sum of all strata) 
-  # S_H: vector size H of standard deviation in each stratum
-  # n_H: vector size H of sample size allocated to stratum h
+  # S_H: vector of standard deviation of ocs by stratum
+  # n_H: vector of sample size allocated to each stratum
   sampvar <- 0
   for(i in 1:H) {
     v_h <- (N_H[i]/N)^2 * (S_H[i])^2 / n_H[i]
@@ -54,6 +56,22 @@ get_sampvar2 <- function(H, N_H, N, S_H, n_H) {
   sampvar <- 0
   for(i in 1:H) {
     v_h <- (N_H[i]/N)^2 * ((N_H[i] - n_H[i]) / N_H[i]) * ((S_H[i])^2 / n_H[i])
+    sampvar <- sampvar+v_h
+  }
+  return(sampvar)
+}
+
+get_sampvar3 <- function(H, N_H, N, S_H, E_H, n_H) {
+  # Function returns the sampling variance for a stratified design
+  # H: scalar for number of strata
+  # N_H: vector of stratum sizes (number of grid points)
+  # N: scalar for total grid points (sum of all strata) 
+  # S_H: vector of standard deviation of ocs by stratum
+  # E_H: vector of mean standard deviation in ocs prediction error by stratum
+  # n_H: vector of sample size allocated to each stratum
+  sampvar <- 0
+  for(i in 1:H) {
+    v_h <- (N_H[i]/N)^2 * ((S_H[i])^2 + E_H[i]^2) / n_H[i]
     sampvar <- sampvar+v_h
   }
   return(sampvar)
@@ -96,7 +114,7 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   nH      <- NA  # Number of strata
   n_tot   <- NA  # Number of total samples
   ocs_avg <- mean(ocs_pr$ocs_m, na.rm = TRUE)  # overall mean organic carbon stock
-  N_tot       <- sum(!is.na(ocs_pr$ocs_m))  # N total number of grid points
+  N_tot   <- sum(!is.na(ocs_pr$ocs_m))  # N total number of grid points
   
   for(i in 1:max_H) {
     
@@ -131,7 +149,13 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       n_tot <- sum(H_stats$opt_n)  # recalculate to fix any difference after rounding
       
       # Get the overall sampling variance as a function of stratified sampling
-      samp_var <- get_sampvar(H = nH, N_H = H_stats$stratum_size, N = N_tot, S_H = H_stats$stratum_sd, n_H = H_stats$opt_n)
+      if(use_prederr) {
+        samp_var <- get_sampvar3(H = nH, N_H = H_stats$stratum_size, N = N_tot, S_H = H_stats$stratum_sd,
+                                 E_H = H_stats$stratum_errsd, n_H = H_stats$opt_n)
+      } else {
+        samp_var <- get_sampvar(H = nH, N_H = H_stats$stratum_size, N = N_tot, S_H = H_stats$stratum_sd,
+                                n_H = H_stats$opt_n)  
+      }
       
       # Get confidence interval
       ci <- get_confint(conf_lev = conf_lev, sampvar = samp_var, n_tot = n_tot)
@@ -194,23 +218,32 @@ r_ocs_m <- rast(ocs_file)
 r_ocs_err <- rast(ocserr_file)
 
 # Get the values as a matrix
-ocs_df <- data.frame(
-  ocs_m = terra::values(r_ocs_m),
-  ocs_sd = terra::values(r_ocs_err),
+ocs_raw <- data.frame(
+  ocs_m = as.vector(terra::values(r_ocs_m)),
+  ocs_sd = as.vector(terra::values(r_ocs_err)),
   stratum = NA )  # add a variable to hold stratum values
 
+# Check the data
+hist(ocs_raw$ocs_m)
+hist(ocs_raw$ocs_sd)
+
+# Log transform to get normal distributions
+ocs_tran <- ocs_raw
+ocs_tran <- ocs_tran %>%
+  mutate(ocs_m_ln = log(ocs_m), ocs_sd_ln =  log(ocs_sd))
+
 # Call the sampling optimization function
-optim_out <- optim_sampling(ocs_pr = ocs_df, conf_lev = conf_lev, max_ci = max_ci,
+optim_out <- optim_sampling(ocs_pr = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
                            n_mps = n_mps, min_H = min_H, sample_inc = sample_inc)
 
 print(optim_out[[2]])
 print(optim_out[[3]])
 
 # Create raster of strata
-ocs_H <- setValues(r_ocs_m, optim_out[[1]][[2]])
+ocs_H <- terra::setValues(r_ocs_m, optim_out[[1]][[2]])
 
 # Save results ======
 info_file <- paste0("data/workfiles/", test_id, "_strata_optim_info.csv")
 write_csv(optim_out[[2]], info_file)
 strata_file <- paste0("data/workfiles/", test_id, "_ocs_strata.tif")
-writeRaster(x = ocs_H, strata_file, overwrite = TRUE)
+terra::writeRaster(x = ocs_H, strata_file, overwrite = TRUE)
