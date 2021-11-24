@@ -5,15 +5,15 @@ library(rgdal)
 library(ggplot2)
 library(dplyr)
 
-tif_file <- 'data/workfiles/soilgrids_ocs_uncertainty_central-iowa.tif'
+# tif_file <- 'data/workfiles/soilgrids_ocs_uncertainty_central-iowa.tif'
+tif_file <- 'data/get_soilgrids_data/Iowa_ocs_0-30_Q0.05_2.tif'
 GDALinfo(tif_file)
 tif <- raster(tif_file)
-hist(tif)
+# hist(tif)
 plot(tif)
-tif2 <- reclassify(tif, cbind(5000, 50000, NA))
-hist(tif2)
-plot(tif2)
-summary(values(tif2))
+# tif2 <- reclassify(tif, cbind(5000, 50000, NA))
+# # hist(tif2)
+# plot(tif2)
 
 ocs_file <- 'data/workfiles/soilgrid_ocs_mean_iowa_crs-aea.tif'
 GDALinfo(ocs_file)

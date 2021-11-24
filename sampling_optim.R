@@ -1,12 +1,14 @@
 # This script optimizes a SOC sampling design taking into account stratification and target confidence interval 
 
-library(raster)
+library(terra)
 library(rgdal)
 library(tidyverse)
 
-# Definitions and settings ======
-test_id    <- "test2"
-ocs_file   <- 'data/workfiles/ocs_mean_iowa_onlycrop.tif'
+# Settings ======
+test_id     <- "test2"
+ocs_file    <- 'data/workfiles/soilgrids_ocs_mean_iowa.tif'
+ocserr_file <- 'data/workfiles/soilgrids_ocs_errsd_iowa.tif'
+
 conf_lev   <- 0.95  # confidence level required
 max_cif    <- 0.05  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
@@ -99,7 +101,7 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   for(i in 1:max_H) {
     
     if(i==1) {nH <- min_H} else {nH <- nH+1}
-    
+    cat("Optimizing at stratification:", nH, "\n")
     # if(nH == 20) browser()  # debug line
     
     # Create strata
@@ -188,10 +190,14 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
 # Analysis ============
 
 # Read in the data of SOC predictions over the target area
-ocs_r <- raster(ocs_file)
+r_ocs_m <- rast(ocs_file)
+r_ocs_err <- rast(ocserr_file)
 
 # Get the values as a matrix
-ocs_df <- data.frame(ocs_m = getValues(ocs_r), stratum = NA)  # add a variable to hold stratum values
+ocs_df <- data.frame(
+  ocs_m = values(r_ocs_m),
+  ocs_sd = values(r_ocs_err),
+  stratum = NA )  # add a variable to hold stratum values
 
 # Call the sampling optimization function
 optim_out <- optim_sampling(ocs_pr = ocs_df, conf_lev = conf_lev, max_ci = max_ci,
@@ -201,7 +207,7 @@ print(optim_out[[2]])
 print(optim_out[[3]])
 
 # Create raster of strata
-ocs_H <- setValues(ocs_r, optim_out[[1]][[2]])
+ocs_H <- setValues(r_ocs_m, optim_out[[1]][[2]])
 
 # Save results ======
 info_file <- paste0("data/workfiles/", test_id, "_strata_optim_info.csv")
