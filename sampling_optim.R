@@ -11,10 +11,10 @@ ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
 use_prederr <- TRUE
 
 conf_lev   <- 0.95  # confidence level required
-max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
+max_cif    <- 0.05  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
-min_H      <- 1     # minimum number of strata
-max_H      <- 10    # number of strata to test
+min_H      <- 2     # minimum number of strata
+max_H      <- 20    # number of strata to test
 max_n      <- 1000  # maximum number of total samples
 sample_inc <- 1     # sample number increment per iteration. For large grids (e.g. Iowa) larger value can save processing time.
 
@@ -31,8 +31,8 @@ get_km_clust <- function(d, c) {
 get_stratstats <- function(df) {
   df_out <- df %>%
     group_by(stratum) %>%
-    summarize(stratum = mean(stratum), stratum_sd = sd(ocs_m), stratum_var = sd(ocs_m)^2,
-              stratum_size = length(ocs_m), stratum_errsd = mean(ocs_sd)) %>%
+    summarize(stratum = mean(stratum), stratum_sd = sd(X), stratum_var = sd(X)^2,
+              stratum_size = length(X), stratum_errsd = mean(X_sd)) %>%
     drop_na(stratum_sd)
 }
 
@@ -102,7 +102,7 @@ get_confint <- function(conf_lev, sampvar, n_tot) {
   ci <- z * se * 2  # Multiplied by 2 to get the full interval length
 }
 
-optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
+optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   # This function obtains the minimum amount of total samples necessary to attain the value of max_ci
   # It also returns the sampling density for each stratum 
   # Returns a list containing: 
@@ -113,21 +113,22 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   H_all   <- tibble(nstrata=1:max_H, n_opt = NA, svar = NA, cif = NA, ci = NA)  # table holding output values
   nH      <- NA  # Number of strata
   n_tot   <- NA  # Number of total samples
-  ocs_avg <- mean(ocs_pr$ocs_m, na.rm = TRUE)  # overall mean organic carbon stock
-  N_tot   <- sum(!is.na(ocs_pr$ocs_m))  # N total number of grid points
+  ocs_avg <- mean(df_in$X, na.rm = TRUE)  # overall mean organic carbon stock
+  N_tot   <- sum(!is.na(df_in$X))  # N total number of grid points
   
   for(i in 1:max_H) {
     
     if(i==1) {nH <- min_H} else {nH <- nH+1}
     cat("Optimizing at stratification:", nH, "\n")
+    
     # if(nH == 20) browser()  # debug line
     
     # Create strata
-    clust <- get_km_clust(d = ocs_pr$ocs_m, c = nH)
-    ocs_pr$stratum[which(!is.na(ocs_pr$ocs_m))] <- as.integer(clust$cluster)
+    clust <- get_km_clust(d = df_in$X_raw, c = nH)
+    df_in$stratum[which(!is.na(df_in$X_raw))] <- as.integer(clust$cluster)
     
     # Get statistics for current stratification
-    H_stats <- get_stratstats(ocs_pr)
+    H_stats <- get_stratstats(df_in)
     
     iter1 <- 1
     # target_reached <- FALSE  # not used
@@ -136,17 +137,22 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       
       # Calculate the total sampling size
       if(iter1==1) {n_tot <- n_mps * nH} else {n_tot <- n_tot + sample_inc}
+      
+      # print(n_tot)  # for debug
+      
       if(n_tot > max_n) {
         cat(paste0("Reached maximum number of allowed samples at stratification: ", nH, "\n"))
         break
       }
+      
+      # if(n_tot == 42 & nH == 3) browser()  # debug line
       
       # Get the optimal allocation
       opt_n <- get_optsampalloc(H = nH, N_H = H_stats$stratum_size, S_H = H_stats$stratum_sd, n_tot = n_tot)
       opt_n[opt_n < n_mps] <- n_mps  # if we don't get the minimum n per stratum, add where necessary
 
       H_stats$opt_n <- opt_n
-      n_tot <- sum(H_stats$opt_n)  # recalculate to fix any difference after rounding
+      n_tot2 <- sum(H_stats$opt_n)  # recalculate to fix any difference after rounding
       
       # Get the overall sampling variance as a function of stratified sampling
       if(use_prederr) {
@@ -158,13 +164,13 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       }
       
       # Get confidence interval
-      ci <- get_confint(conf_lev = conf_lev, sampvar = samp_var, n_tot = n_tot)
+      ci <- get_confint(conf_lev = conf_lev, sampvar = samp_var, n_tot = n_tot2)
       cif <- ci / ocs_avg
       
       # Check if cif is same or lower than the maximum allowed confidence interval
       if(cif <= max_cif) {
         # target_reached <- TRUE
-        H_all$n_opt[i] <- n_tot
+        H_all$n_opt[i] <- n_tot2
         H_all$svar[i] <- samp_var
         H_all$cif[i] <- cif * 100
         H_all$ci[i] <- ci
@@ -184,15 +190,14 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   # If more than one selected, take the case with more strata (err on the safe side)
   H_best  <- H_sel[H_sel$nstrata == max(H_sel$nstrata, na.rm=TRUE),]
   
-  
   # Recalculate clusters and sampling for the selected case ----- (deduplicate code?)
   
   # Create strata
-  clust <- get_km_clust(d = ocs_pr$ocs_m, c = H_best$nstrata[1])
-  ocs_pr$stratum[which(!is.na(ocs_pr$ocs_m))] <- as.integer(clust$cluster)
+  clust <- get_km_clust(d = df_in$X, c = H_best$nstrata[1])
+  df_in$stratum[which(!is.na(df_in$X))] <- as.integer(clust$cluster)
   
   # Get statistics for best stratification
-  Hb_stats <- get_stratstats(ocs_pr)
+  Hb_stats <- get_stratstats(df_in)
   
   # Get the optimal allocation
   Hb_stats$opt_n <- get_optsampalloc(H = H_best$nstrata[1], N_H = Hb_stats$stratum_size, S_H = Hb_stats$stratum_sd, n_tot = H_best$n_opt[1])
@@ -206,7 +211,7 @@ optim_sampling <- function(ocs_pr, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       "Samples per strata = ", Hb_stats$opt_n, "\n"
   )
   
-  return(list(ocs_out = ocs_pr, Strata_stats = Hb_stats, Strata_all = H_all))
+  return(list(Strata_out = df_in, Strata_stats = Hb_stats, Strata_all = H_all))
   
 }
 
@@ -219,21 +224,22 @@ r_ocs_err <- rast(ocserr_file)
 
 # Get the values as a matrix
 ocs_raw <- data.frame(
-  ocs_m = as.vector(terra::values(r_ocs_m)),
-  ocs_sd = as.vector(terra::values(r_ocs_err)),
+  X_raw = as.vector(terra::values(r_ocs_m)),
+  X_sd_raw = as.vector(terra::values(r_ocs_err)),
   stratum = NA )  # add a variable to hold stratum values
 
 # Check the data
-hist(ocs_raw$ocs_m)
-hist(ocs_raw$ocs_sd)
+hist(ocs_raw$X_raw)
+hist(ocs_raw$X_sd_raw)
 
 # Log transform to get normal distributions
 ocs_tran <- ocs_raw
+small <- 0.01 # add to avoid 0 values for log transform
 ocs_tran <- ocs_tran %>%
-  mutate(ocs_m_ln = log(ocs_m), ocs_sd_ln =  log(ocs_sd))
+  mutate(X = log(X_raw+small), X_sd =  log(X_sd_raw+small))
 
 # Call the sampling optimization function
-optim_out <- optim_sampling(ocs_pr = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
+optim_out <- optim_sampling(df_in = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
                            n_mps = n_mps, min_H = min_H, sample_inc = sample_inc)
 
 print(optim_out[[2]])
