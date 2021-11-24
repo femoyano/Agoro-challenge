@@ -78,22 +78,22 @@ names(ocserr) <- "ocs_err"
 # hist(ocserr)
 # plot(ocserr)
 
-# Load shapefile and crop data
+# Load shapefile and set projection
 # iowa_sh <- vect("data/shapefiles/tl_2016_19_cousub/tl_2016_19_cousub.shp")
 iowa_sh <- shapefile("data/shapefiles/tl_2016_19_cousub/tl_2016_19_cousub.shp")
 iowa_sh <- spTransform(iowa_sh, proj4string(ocs))  # Use same projections (coordinate system)
-ocs <- crop(ocs, iowa_sh)
-ocs <- mask(ocs, iowa_sh)
-ocserr <- crop(ocserr, iowa_sh)
-ocserr <- mask(ocserr, iowa_sh)
-# check results
-# plot(ocs)
-# plot(ocserr)
 
-library(terra)
-
+# Crop data
 ocs <- rast(ocs)
 ocserr <- rast(ocserr)
+iowa_sh <- vect(iowa_sh)
+ocs <- terra::crop(ocs, iowa_sh)
+ocs <- terra::mask(ocs, iowa_sh)
+ocserr <- terra::crop(ocserr, iowa_sh)
+ocserr <- terra::mask(ocserr, iowa_sh)
+# check results
+plot(ocs)
+plot(ocserr)
 
 # Change the resolution to match ocs data and subset the ocs data using the crop mask
 if(!subset_crop) {
@@ -101,6 +101,7 @@ if(!subset_crop) {
   crop <- rast(cropfile)
 }
 crop2 <- terra::resample(crop, rast(ocs), method='near')
+# ocserr <- terra::resample(ocserr, rast(ocs), method='near')
 ocs <- terra::mask(x = ocs, mask = crop2, maskvalue=0)
 ocserr <- terra::mask(x = ocserr, mask = crop2, maskvalue=0)
 

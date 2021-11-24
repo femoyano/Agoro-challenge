@@ -7,7 +7,7 @@ library(tidyverse)
 # Settings ======
 test_id     <- "test2"
 ocs_file    <- 'data/workfiles/soilgrids_ocs_mean_iowa.tif'
-ocserr_file <- 'data/workfiles/soilgrids_ocs_errsd_iowa.tif'
+ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
 
 conf_lev   <- 0.95  # confidence level required
 max_cif    <- 0.05  # maximum allowed confidence interval as fraction of the mean
@@ -195,8 +195,8 @@ r_ocs_err <- rast(ocserr_file)
 
 # Get the values as a matrix
 ocs_df <- data.frame(
-  ocs_m = values(r_ocs_m),
-  ocs_sd = values(r_ocs_err),
+  ocs_m = terra::values(r_ocs_m),
+  ocs_sd = terra::values(r_ocs_err),
   stratum = NA )  # add a variable to hold stratum values
 
 # Call the sampling optimization function
