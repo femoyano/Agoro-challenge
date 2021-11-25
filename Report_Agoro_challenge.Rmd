@@ -115,8 +115,7 @@ library(rgdal)
 library(terra)
 library(raster)
 library(tidyverse)
-library(viridis)
-library(ggthemes)
+library(skimr)
 ```
 
 
@@ -137,7 +136,7 @@ download_ocs <- FALSE
 
 crop_file <- 'data/crop_mask/CDL_2020_19/CDL_2020_19.tif'
 crop <- rast(crop_file)
-plot(crop)
+plot(crop, main="All land uses")
 if(subset_crop) {
   # Subset cropped areas ---
   
@@ -182,7 +181,7 @@ if(subset_crop) {
   cropfile <- 'data/workfiles/cropland-iowa.tif'
   crop <- rast(cropfile)
 }
-plot(crop)
+plot(crop, main="Cropland against empty background")
 ```
 
 Here the Python script to download OSC data is called and the data is loaded. An Iowa shape file is loaded and reprojected to the required coordinate system, then used to crop the OSC data. The crop map data is resampled to fit the resolution of the OCS grid (from 30m to 250m) and then used to select (mask) the OSC data. The final data (organic carbon stocks for cropland in Iowa) is plotted (tC / ha).
@@ -225,8 +224,8 @@ ocs <- terra::mask(x = ocs, mask = crop2, maskvalue=0)
 ocserr <- terra::mask(x = ocserr, mask = crop2, maskvalue=0)
 
 # check results
-plot(ocs)
-plot(ocserr)
+plot(ocs, main = "Organic C stocks mean on croplands (t/ha)")
+plot(ocserr, main = "Organic C stocks 0.05 percentiles on croplands (t/ha)")
 ```
   
   
@@ -252,9 +251,9 @@ ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
 use_prederr <- TRUE
 
 conf_lev   <- 0.95  # confidence level required
-max_cif    <- 0.01  # maximum allowed confidence interval as fraction of the mean
+max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
-min_H      <- 2     # minimum number of strata
+min_H      <- 3     # minimum number of strata
 max_H      <- 10    # number of strata to test
 max_n      <- 1000  # maximum number of total samples
 sample_inc <- 1     # sample number increment per iteration. In case processing time becomes critical.
@@ -276,8 +275,8 @@ get_km_clust <- function(d, c) {
 get_stratstats <- function(df) {
   df_out <- df %>%
     group_by(stratum) %>%
-    summarize(stratum = mean(stratum), stratum_sd = sd(X), stratum_var = sd(X)^2,
-              stratum_size = length(X), stratum_errsd = mean(X_sd)) %>%
+    summarize(stratum = mean(stratum), stratum_size = length(X), stratum_m = mean(X),
+              stratum_sd = sd(X), stratum_var = sd(X)^2, stratum_errsd = mean(X_sd)) %>%
     drop_na(stratum_sd)
 }
 
@@ -366,7 +365,7 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   #   2. dataframe with strata numbers and optimized samples per strata
   
   # Working variables
-  H_all   <- tibble(nstrata=min_H:max_H, n_opt = NA, svar = NA, cif = NA, ci = NA)  # table holding output values
+  H_all   <- tibble(nstrata=min_H:max_H, n_opt = NA, sampvar = NA, cif = NA, ci = NA)  # table holding output values
   nH      <- NA  # Number of strata
   n_tot   <- NA  # Number of total samples
   ocs_avg <- mean(df_in$X, na.rm = TRUE)  # overall mean organic carbon stock
@@ -428,7 +427,7 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       if(cif <= max_cif) {
         # target_reached <- TRUE
         H_all$n_opt[i] <- n_tot2
-        H_all$svar[i] <- samp_var
+        H_all$sampvar[i] <- samp_var
         H_all$cif[i] <- cif * 100
         H_all$ci[i] <- ci
         break
@@ -486,33 +485,45 @@ r_ocs_m <- rast(ocs_file)
 r_ocs_err <- rast(ocserr_file)
 
 # Get the values as a matrix
-ocs_raw <- data.frame(
-  X_raw = as.vector(terra::values(r_ocs_m)),
-  X_sd_raw = as.vector(terra::values(r_ocs_err)),
-  stratum = NA )  # add a variable to hold stratum values
+df_ocs <- data.frame(
+  stratum = rep(NA,  ncell(r_ocs_err)),
+  ocs_raw = as.vector(terra::values(r_ocs_m)),
+  ocs_sd_raw = as.vector(terra::values(r_ocs_err))
+  )  # add a variable to hold stratum values
 
 # Check the data
-hist(ocs_raw$X_raw, 80, main = "org C means")
-hist(ocs_raw$X_sd_raw, 80, main = "org C standard deviations")
+hist(df_ocs$ocs_raw, 80, main = "org C means")
+hist(df_ocs$ocs_sd_raw, 80, main = "org C standard deviations")
 
 # Log transform to get normal distributions
-ocs_tran <- ocs_raw
 small <- 1 # add to avoid 0 values for log transform
-ocs_tran <- ocs_tran %>%
-  mutate(X = log(X_raw+small), X_sd =  log(X_sd_raw+small))
+df_ocs <- df_ocs %>%
+  mutate(ocs = log(ocs_raw+small), ocs_sd =  log(ocs_sd_raw+small))
 
-hist(ocs_tran$X, 80, main = "log org C means")
-hist(ocs_tran$X_sd, 80, main = "log org C standard deviations")
+hist(df_ocs$ocs, 80, main = "log org C means")
+hist(df_ocs$ocs_sd, 80, main = "log org C standard deviations")
+
+skim(df_ocs[, names(df_ocs) != "stratum"])
 
 ```
   
   
-The sampling optimization is run and the results saved. The first table shows the strata of the optimal design, including size and number of samples. The second table shows results for all tested stratifications.
+The sampling optimization is run 
 ```{r}
+ocs_in <- df_ocs
+names(ocs_in) <- c("stratum", "X_raw", "X_sd_raw", "X", "X_sd") 
 # Call the sampling optimization function
-optim_out <- optim_sampling(df_in = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
+optim_out <- optim_sampling(df_in = ocs_in, conf_lev = conf_lev, max_ci = max_ci,
                            n_mps = n_mps, min_H = min_H, sample_inc = sample_inc)
-
+```
+  
+  
+Results are saved and plotted. The first table shows the strata of the optimal design, including size and number of samples. The second table shows results for all tested stratifications.
+```{r}
+out1 <- subset(optim_out[[1]], select = c("stratum", "X", "X_sd"))
+names(out1) <- c("stratum", "ocs_mean", "ocs_sd")
+print(group_by(out1, stratum) %>%
+  skim())
 print(optim_out[[2]])
 print(optim_out[[3]])
 
@@ -534,7 +545,7 @@ Finally, the optimal stratification map is plotted.
 mycolors <- rainbow(nrow(strata_info))
 # mycolors <- terrain.colors(nrow(strata_info))
 
-plot(ocs_H, col = mycolors, legend = FALSE)
+plot(ocs_H, col = mycolors, legend = FALSE, main = "Stratification for optimal sampling design")
 legend(title = "Strata", "topright", legend = strata_info$stratum, fill = mycolors)
 
 ```
