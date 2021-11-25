@@ -1,7 +1,12 @@
 ---
 title: "Agoro coding challenge"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
+
+**Fernando Moyano**  
+2021/11/23
 
 **This R-notebook has results for the Agoro coding challenge. It includes all the related R scripts with documentation for each step.**
 
@@ -101,6 +106,7 @@ where N_h is the total grid point in stratum h, S_h is the standard deviation in
 
 For each stratification, n is iteratively increased from a defined minimum, until the condition CI/mean < 0.15 is met. The stratification with the lowest n is selected as optimal.
 
+
 ### Step by step procedure
 
 Start by loaded all required packages
@@ -109,7 +115,10 @@ library(rgdal)
 library(terra)
 library(raster)
 library(tidyverse)
+library(viridis)
+library(ggthemes)
 ```
+
 
 #### Processing of geospatial data
 
@@ -219,7 +228,8 @@ ocserr <- terra::mask(x = ocserr, mask = crop2, maskvalue=0)
 plot(ocs)
 plot(ocserr)
 ```
-
+  
+  
 The error standard deviation is derived from the 0.05 percentile and mean OCS data. The data is then written to file.
 ```{r}
 # Lets convert 0.05 percentile to standard deviation assuming a normal distribution of the error:
@@ -229,8 +239,8 @@ ocserr_sd <- (ocserr-ocs)/(-1.645)  #  -1.645 value of Z at 0.05 percentile
 terra::writeRaster(ocs, 'data/workfiles/soilgrids_ocs_mean_iowa.tif', overwrite=TRUE)
 terra::writeRaster(ocserr_sd, 'data/workfiles/soilgrids_ocserr_sd_iowa.tif', overwrite=TRUE)
 ```
-
-
+  
+  
 #### Optimization procedure
 
 Several settings can be adjusted here. E.g. the input data files, confidence level required and minimum/maximum strata or samples.
@@ -242,7 +252,7 @@ ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
 use_prederr <- TRUE
 
 conf_lev   <- 0.95  # confidence level required
-max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
+max_cif    <- 0.01  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
 min_H      <- 2     # minimum number of strata
 max_H      <- 10    # number of strata to test
@@ -250,7 +260,8 @@ max_n      <- 1000  # maximum number of total samples
 sample_inc <- 1     # sample number increment per iteration. In case processing time becomes critical.
 
 ```
-
+  
+  
 Several functions are defined here, mostly related to the main equations used.
 ```{r}
 # Function definitions ========
@@ -336,7 +347,8 @@ get_confint <- function(conf_lev, sampvar, n_tot) {
   ci <- t * se * 2  # Multiplied by 2 to get the full interval length
 }
 ```
-
+  
+  
 The main optimization function.  
 This function iterates over the defined stratification levels and uses a while loop for number of samples to find the optimal value.
 A "best" combination is selected. Results returned include: 
@@ -463,7 +475,8 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   
 }
 ```
-
+  
+  
 Here the necessary raster data is loaded and extracted to a data frame. A histogram shows that the OCS data is skewed so a log transform is applied.
 ```{r}
 # Load and execute ============
@@ -492,8 +505,9 @@ hist(ocs_tran$X, 80, main = "log org C means")
 hist(ocs_tran$X_sd, 80, main = "log org C standard deviations")
 
 ```
-
-Finally, the sampling optimization is run and the results saved. The first table shows the strata of the optimal design, including size and number of samples. The second table shows results for all tested stratifications.
+  
+  
+The sampling optimization is run and the results saved. The first table shows the strata of the optimal design, including size and number of samples. The second table shows results for all tested stratifications.
 ```{r}
 # Call the sampling optimization function
 optim_out <- optim_sampling(df_in = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
@@ -506,21 +520,52 @@ print(optim_out[[3]])
 ocs_H <- terra::setValues(r_ocs_m, optim_out[[1]][[2]])
 
 # Save results ======
+strata_info <- optim_out[[2]]
 info_file <- paste0("data/workfiles/", test_id, "_strata_optim_info.csv")
-write_csv(optim_out[[2]], info_file)
+write_csv(strata_info, info_file)
 strata_file <- paste0("data/workfiles/", test_id, "_ocs_strata.tif")
 terra::writeRaster(x = ocs_H, strata_file, overwrite = TRUE)
 ```
+  
+    
+Finally, the optimal stratification map is plotted.
+
+```{r}
+mycolors <- rainbow(nrow(strata_info))
+# mycolors <- terrain.colors(nrow(strata_info))
+
+plot(ocs_H, col = mycolors, legend = FALSE)
+legend(title = "Strata", "topright", legend = strata_info$stratum, fill = mycolors)
+
+```
 
 
-##Discussion
+## Discussion
 
-Re-sampling at the same points is not recommended by (Gruijter et al. 2016). With different points there is no temporal auto-correlation, so the term rho becomes zero:  
+**Main conclusions**
+
+* The spatial variance in the predicted values is relatively small. The prediction errors are considerably larger and make a considerable difference in the final n size. However, the total sampling size remains low for such a large area. 
+* The variance from predictions likely underestimates the real variance. Predictions are a mean of 250x250m. The variance at a smaller scale is probably considerable and will affect sampling results.
+* Given the available data and confidence level required, stratification does not lead to noticeable improvements. We get a stratified result only after largely increasing the confidence level.
+
+**What can still be improved**
+
+* Prediction errors (and eventually sampling errors) can be used to improve stratification. Method needs developing.
+* A quick survey is needed to gauge the actual variability in the field. Stratifications obtained here can be used as a guide to select areas.
+* A resampling at same location mgith be a good idea because deviations in soil properties are expected to be strognly auto-correlated in time. This is contrary to conclusions by Gruijter et al. 2016
+* An optimization of potential financial gain could be implemented.
+
+**Critique to Gruijter et al. 2016**
+
+1. 
+Gruijter et al. 2016 make the critical assumption that a soil will sequester enough C that any reduction of the estimated variance will lead to credited C. In all cases in which there is no gain or the gain is small compared to the sampling variance, this does not hold. 
+
+2.
+Re-sampling at the same points is not recommended by Gruijter et al. 2016. With different points there is no temporal auto-correlation, so the term rho becomes zero:
+V(x_bar_delta) = V(x_bar_t1) + V(x_bar_t2) - 2 * rho * sqrt( V(x_bar_t1) * V(x_bar_t2) )  =>
 V(x_bar_delta) = V(x_bar_t1) + V(x_bar_t2) 
 
-**Variance of estimated difference**
-V(x_bar_delta) = V(x_bar_t2 - x_bar_t1)  
-               = V(x_bar_t1) + V(x_bar_t2) - 2 * rho * sqrt( V(x_bar_t1) * V(x_bar_t2) )  
+However, the covariance term could be potentially large and an advantage for repeated soil sampling.
 
 
 ## References 

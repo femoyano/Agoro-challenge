@@ -20,13 +20,3 @@ mycolors <- rainbow(nrow(strata_info))
 
 plot(strata_r, col = mycolors, legend = FALSE)
 legend(title = "Strata", "topright", legend = strata_info$stratum, fill = mycolors)
-
-str_spdf <- as(strata_r, "SpatialPixelsDataFrame")
-str_df <- as.data.frame(str_spdf)
-colnames(str_df) <- c("strata", "x", "y")
-str_df$strata <- as.factor(str_df$strata)
-
-ggplot() +  
-  geom_tile(data=str_df, aes(x=x, y=y, fill=strata), alpha=0.8) + 
-  scale_colour_manual(name="Strata", values = mycolors) +
-  coord_equal() #+ theme_map()
