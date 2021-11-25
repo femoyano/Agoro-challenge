@@ -18,7 +18,7 @@ The approach used here is similar to that in the provided publication (Gruijter 
 * total sampling size
 * within strata sampling size
 
-While Gruijter et al. 2016 aim to maximize an expected profit taking into account sequestered C price, sampling costs and a trading parameter (that balances farmer's and buyer's risks due to uncertainty in C sequestered), the objective here is simpler: we only need to find the minimum number of samples that will give a confidence interval (CI) of less than 15% of the mean.
+While Gruijter et al. 2016 aim to maximize an expected profit taking into account sequestered C price, sampling costs and uncertainties in measurements, the objective here is simpler: we only need to find the minimum number of samples that will give a confidence interval (CI) of less than 15% of the mean.
 
 The main objective-related variables are:
 
@@ -60,7 +60,7 @@ With this data, the sampling variance can be estimated as:
 V(x_bar) = SUM{h=1 -> H} ((N_h / N)^2 * S_h^2 / n_h)
 
 where x_bar is the mean of x, H is number of strata, N_h is size (number of grid points) of stratum h, N is total size (sum of all strata), S_h is standard deviation of x in stratum h, and n_h is sample size allocated to stratum h.  
-However, this formula does not take into account the uncertainty in the model predictions, since S only describes the spatial variance. For this reason, data of organic carbon stock (OCS) uncertainty was downloaded from soilgrids.org, specifically the 0.05 quantile of the prediction probability distribution. Here I assume the errors are normally distributed and so derived an mean error standard deviation per stratum (E_h), included in the formula above as:
+However, this formula does not take into account the uncertainty in the model predictions, since S only describes the spatial variance. For this reason, data of organic carbon stock (OCS) uncertainty was downloaded from soilgrids.org, specifically the 0.05 quantile of the prediction probability distribution. Here I assumed the errors are normally distributed and so derived a mean error standard deviation per stratum (E_h), included in the formula above as:
 
 **Sampling variance with error standard deviation**  
 V(x_bar) = SUM{h=1 -> H} ((N_h / N)^2 * (S_h^2 + E_h^2) / n_h)
@@ -101,7 +101,7 @@ where N_h is the total grid point in stratum h, S_h is the standard deviation in
 
 For each stratification, n is iteratively increased from a defined minimum, until the condition CI/mean < 0.15 is met. The stratification with the lowest n is selected as optimal.
 
-## Step by step procedure
+### Step by step procedure
 
 Start by loaded all required packages
 ```{r message=FALSE, warning=FALSE}
@@ -111,7 +111,7 @@ library(raster)
 library(tidyverse)
 ```
 
-### Processing of geospatial data
+#### Processing of geospatial data
 
 * The area of interest is the entire cropped surface of Iowa. A shape file of Iowa was thus obtained from: https://catalog.data.gov/dataset/tiger-line-shapefile-2016-state-iowa-current-county-subdivision-state-based  
 * To obtain a smaller crop map file, data was downloaded for Iowa 2020 from https://nassgeodata.gmu.edu/CropScape 
@@ -231,7 +231,7 @@ terra::writeRaster(ocserr_sd, 'data/workfiles/soilgrids_ocserr_sd_iowa.tif', ove
 ```
 
 
-### The following section deals with the optimization procedure
+#### Optimization procedure
 
 Several settings can be adjusted here. E.g. the input data files, confidence level required and minimum/maximum strata or samples.
 ```{r}
@@ -464,6 +464,53 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
 }
 ```
 
+Here the necessary raster data is loaded and extracted to a data frame. A histogram shows that the OCS data is skewed so a log transform is applied.
+```{r}
+# Load and execute ============
+
+# Read in the data of SOC predictions over the target area
+r_ocs_m <- rast(ocs_file)
+r_ocs_err <- rast(ocserr_file)
+
+# Get the values as a matrix
+ocs_raw <- data.frame(
+  X_raw = as.vector(terra::values(r_ocs_m)),
+  X_sd_raw = as.vector(terra::values(r_ocs_err)),
+  stratum = NA )  # add a variable to hold stratum values
+
+# Check the data
+hist(ocs_raw$X_raw, 80, main = "org C means")
+hist(ocs_raw$X_sd_raw, 80, main = "org C standard deviations")
+
+# Log transform to get normal distributions
+ocs_tran <- ocs_raw
+small <- 1 # add to avoid 0 values for log transform
+ocs_tran <- ocs_tran %>%
+  mutate(X = log(X_raw+small), X_sd =  log(X_sd_raw+small))
+
+hist(ocs_tran$X, 80, main = "log org C means")
+hist(ocs_tran$X_sd, 80, main = "log org C standard deviations")
+
+```
+
+Finally, the sampling optimization is run and the results saved. The first table shows the strata of the optimal design, including size and number of samples. The second table shows results for all tested stratifications.
+```{r}
+# Call the sampling optimization function
+optim_out <- optim_sampling(df_in = ocs_tran, conf_lev = conf_lev, max_ci = max_ci,
+                           n_mps = n_mps, min_H = min_H, sample_inc = sample_inc)
+
+print(optim_out[[2]])
+print(optim_out[[3]])
+
+# Create raster of strata
+ocs_H <- terra::setValues(r_ocs_m, optim_out[[1]][[2]])
+
+# Save results ======
+info_file <- paste0("data/workfiles/", test_id, "_strata_optim_info.csv")
+write_csv(optim_out[[2]], info_file)
+strata_file <- paste0("data/workfiles/", test_id, "_ocs_strata.tif")
+terra::writeRaster(x = ocs_H, strata_file, overwrite = TRUE)
+```
 
 
 ##Discussion
