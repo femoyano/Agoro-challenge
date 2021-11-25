@@ -11,12 +11,12 @@ ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
 use_prederr <- TRUE
 
 conf_lev   <- 0.95  # confidence level required
-max_cif    <- 0.05  # maximum allowed confidence interval as fraction of the mean
+max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
 n_mps      <- 3     # minimum number of sampling points allowed per strata
 min_H      <- 2     # minimum number of strata
-max_H      <- 20    # number of strata to test
+max_H      <- 10    # number of strata to test
 max_n      <- 1000  # maximum number of total samples
-sample_inc <- 1     # sample number increment per iteration. For large grids (e.g. Iowa) larger value can save processing time.
+sample_inc <- 1     # sample number increment per iteration. In case processing time becomes critical.
 
 
 # Function definitions ========
@@ -97,9 +97,9 @@ get_optsampalloc <- function(H, N_H, S_H, n_tot) {
 
 get_confint <- function(conf_lev, sampvar, n_tot) {
   # Two-sided confidence interval calculation
-  z <- qnorm(1-(1-conf_lev)/2)  # use of the Z value assumes a large enough number of samples (> 30)
+  t <- qt(1-(1-conf_lev)/2, n_tot-1)  # the t-score from students distribution
   se <- sqrt(sampvar) / sqrt(n_tot) # standard error
-  ci <- z * se * 2  # Multiplied by 2 to get the full interval length
+  ci <- t * se * 2  # Multiplied by 2 to get the full interval length
 }
 
 optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
@@ -110,15 +110,16 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   #   2. dataframe with strata numbers and optimized samples per strata
   
   # Working variables
-  H_all   <- tibble(nstrata=1:max_H, n_opt = NA, svar = NA, cif = NA, ci = NA)  # table holding output values
+  H_all   <- tibble(nstrata=min_H:max_H, n_opt = NA, svar = NA, cif = NA, ci = NA)  # table holding output values
   nH      <- NA  # Number of strata
   n_tot   <- NA  # Number of total samples
   ocs_avg <- mean(df_in$X, na.rm = TRUE)  # overall mean organic carbon stock
   N_tot   <- sum(!is.na(df_in$X))  # N total number of grid points
+  H_levs  <- min_H:max_H  # stratification levels to test
   
-  for(i in 1:max_H) {
+  for(i in 1:length(H_levs)) {
     
-    if(i==1) {nH <- min_H} else {nH <- nH+1}
+    nH <- H_levs[i]
     cat("Optimizing at stratification:", nH, "\n")
     
     # if(nH == 20) browser()  # debug line
@@ -140,17 +141,17 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
       
       # print(n_tot)  # for debug
       
+      # Stop if maximum allowed samples reached
       if(n_tot > max_n) {
         cat(paste0("Reached maximum number of allowed samples at stratification: ", nH, "\n"))
         break
       }
       
-      # if(n_tot == 42 & nH == 3) browser()  # debug line
+      # if(n_tot == 64 & nH == 6) browser()  # debug line
       
       # Get the optimal allocation
       opt_n <- get_optsampalloc(H = nH, N_H = H_stats$stratum_size, S_H = H_stats$stratum_sd, n_tot = n_tot)
       opt_n[opt_n < n_mps] <- n_mps  # if we don't get the minimum n per stratum, add where necessary
-
       H_stats$opt_n <- opt_n
       n_tot2 <- sum(H_stats$opt_n)  # recalculate to fix any difference after rounding
       
@@ -200,7 +201,10 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
   Hb_stats <- get_stratstats(df_in)
   
   # Get the optimal allocation
-  Hb_stats$opt_n <- get_optsampalloc(H = H_best$nstrata[1], N_H = Hb_stats$stratum_size, S_H = Hb_stats$stratum_sd, n_tot = H_best$n_opt[1])
+  
+  opt_n <- get_optsampalloc(H = H_best$nstrata[1], N_H = Hb_stats$stratum_size, S_H = Hb_stats$stratum_sd, n_tot = H_best$n_opt[1])
+  opt_n[opt_n < n_mps] <- n_mps  # if we don't get the minimum n per stratum, add where necessary
+  Hb_stats$opt_n <- opt_n
   
   cat(" Confidence interval equal or less than the target (" ,  max_cif * 100, "% ) was found.\n")
   cat(" CI = ", H_best$ci, "\n",
@@ -216,7 +220,7 @@ optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
 }
 
 
-# Analysis ============
+# Load and execute ============
 
 # Read in the data of SOC predictions over the target area
 r_ocs_m <- rast(ocs_file)
