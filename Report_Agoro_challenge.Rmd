@@ -3,125 +3,482 @@ title: "Agoro coding challenge"
 output: html_notebook
 ---
 
-## Introduction
+**This R-notebook has results for the Agoro coding challenge. It includes all the related R scripts with documentation for each step.**
 
-This is an R-notebook written for the Agoro coding challenge. It includes all the related R scripts as well as documentation on each step.  
+## Introduction
 
 The objective of the challenge is _to develop and document an optimal sampling strategy to obtain the mean SOC content for all cropland in Iowa, with a 95% confidence interval being smaller or equal to 15% of the mean._
 
 An optimized sampling strategy needs to take into account the heterogeneity of the area being measured, specifically in terms of SOC content. SOC itself or variables known to correlate with SOC can be used to characterize this heterogeneity.
 
-At this point I make the assumption that we are interested in the top soil only. Subsoil changes in SOC are disregarded.
-
-The provided paper by Gruijter et al. 2016 will be used as basis to develop the approach. The study uses a map of C content with associated uncertainty to optimize:
+The approach used here is similar to that in the provided publication (Gruijter et al. 2016). The study uses a map of C content with associated uncertainty to optimize:
 
 * number of strata 
 * stratum boundaries
 * total sampling size
 * within strata sampling size
 
-The optimization maximizes an expected profit taking into account:
+While Gruijter et al. 2016 aim to maximize an expected profit taking into account sequestered C price, sampling costs and a trading parameter (that balances farmer's and buyer's risks due to uncertainty in C sequestered), the objective here is simpler: we only need to find the minimum number of samples that will give a confidence interval (CI) of less than 15% of the mean.
 
-* sequestered C price
-* sampling costs
-* a trading parameter that balances farmer's and buyer's risks due to uncertainty in C sequestered
+The main objective-related variables are:
 
-
-## Deliverables
-
-* A presentation of your approach, highlighting key steps and decision made (few slides)
-* A script supporting your approach 
-* A map of the designed sampling plan
-* The final sampling density 
-* A description of what your next steps would be, if you had more time/resources to refine your approach
-
-
-## Data
-
-Provided:  
-
-* Köppen-Geiger climate classification for the period 1988-2017. World coverage.
-* Crop mask: cultivated area for 2020 (very large .img file) (https://nassgeodata.gmu.edu/CropScape/)
-* Terrain: elevation (DEM) and wetness. Only pointer to online resource
-* Soil: soilgrid data for clay and SOC. 250m scale
-
-Other obtained:  
-
-* Crop Data Layer in .tif format only for Iowa 2020 (https://nassgeodata.gmu.edu/CropScape/)
+* Target universe: entire cropland area in Iowa
+* Target variable: (top)soil organic carbon (SOC)
+* Target parameter: sampling uncertainty
 
 
 ## Methods
 
-We define the objective-related variables:
+#### Type of sampling
 
-* Target universe: all cropland area in Iowa
-* Target variable: soil organic carbon (SOC) (define to what depth after looking at data)
-* Target parameter: change in SOC x years after change from conventional to no till
+Following Gruijter et al. 2016, I chose a design-based sampling approach, thus excluding a model-based approach (so no previous assumption about spatial distribution). 
 
-A design-based sampling approach is used. Specifically we will use a Stratified Simple Random Sampling (StSRS). The entire area is divided into strata with simple random sampling applied in each.
+In addition, I also apply a stratification (Stratified Simple Random Sampling, StSRS), so that the entire area is divided into strata with simple random sampling applied in each. Stratification becomes useful when the data is known or suspected to be clustered, so that the variance within groups is smaller than the overall variance. This is expected for soil characteristics (think soil types).
 
 As per discussed in Gruijter et al. 2016, bulking of soil samples is excluded. In particular, this method impedes a proper calculation of optimal sampling numbers across strata.
 
+#### Confidence interval calculation
 
-### Stratification method
+To calculate the confidence interval one needs some information about the variance of the target variable (organic C stocks) in the region of interest. If no direct data is available, some options (from worst to best) are:
+
+1. making an assumption (a best guess) about the population distribution
+2. using other variables as proxy data
+3. using predictions of the target variable
+
+The available data are:
+
+* Köppen-Geiger climate classification for the period 1988-2017. World coverage.
+* Crop mask: cultivated area for 2020 (https://nassgeodata.gmu.edu/CropScape/)
+* Terrain: elevation (DEM) and wetness. Only pointer to online resource
+* Soil: soilgrid data for clay and SOC. 250m scale
+
+While clay can be used as a proxy for SOC, we already have SOC predictions (soilgrids.org at a 250m resolution), which are surely better than any prediction we can now make for this large region. So we use the predictions directly to estimate variance.
+
+With this data, the sampling variance can be estimated as:
+
+**Sampling variance**  
+V(x_bar) = SUM{h=1 -> H} ((N_h / N)^2 * S_h^2 / n_h)
+
+where x_bar is the mean of x, H is number of strata, N_h is size (number of grid points) of stratum h, N is total size (sum of all strata), S_h is standard deviation of x in stratum h, and n_h is sample size allocated to stratum h.  
+However, this formula does not take into account the uncertainty in the model predictions, since S only describes the spatial variance. For this reason, data of organic carbon stock (OCS) uncertainty was downloaded from soilgrids.org, specifically the 0.05 quantile of the prediction probability distribution. Here I assume the errors are normally distributed and so derived an mean error standard deviation per stratum (E_h), included in the formula above as:
+
+**Sampling variance with error standard deviation**  
+V(x_bar) = SUM{h=1 -> H} ((N_h / N)^2 * (S_h^2 + E_h^2) / n_h)
+
+We then can get the confidence interval for a given confidence level (in this case 95%):
+
+**Confidence Interval (CI)**  
+x_bar +- t * (S / sqrt(n))  
+
+where t is the t-score calculated form the confidence and n.
+
+#### Stratification method
 
 The following approaches can be taken to stratify the area of interest:
 
 1. *Compact geographical stratification*  
-This method is only useful if there is no data available for the region. This is not our case.
+This approach is only useful if there is no data available for the region. This is not our case.
 
 2. *Stratification by ancillary variables*
-This method is useful of we have related ancillary data but not estimates of the target variable itself. In our case, we have SOC estimates from SoilGrids250m (soilgrids.org).
+This approach is useful of we have related ancillary data but not estimates of the target variable itself. In our case, we have SOC estimates from SoilGrids250m (soilgrids.org).
 
 3. *Stratification by a map of predictions*
-This method improves over the previous option, as it already provides the 'best estimate' of SOC content distribution in the area. However, it does not take into account prediction uncertainties.
+This approach improves over the previous option, as it already provides the 'best estimate' of SOC content distribution in the area. However, it does not take into account prediction uncertainties.
 
 4. *Stratification by a map of predictions with uncertainties*
-This method is ideal as it takes uncertainties in predictions into account. However, we currently do not have the uncertainty data. This option can be explored given more time.
+This approach is ideal as it takes uncertainties in predictions into account. However, according to Gruijter et al. 2016 the computation is slow for large grids, as in this case, and the code is not available. This option can be explored given more time (described in Gruijter et al. 2015).
 
-Given the available time and data, Method 3 (*Stratification by a map of predictions*) is chosen in this first approach.
+I thus used the 3rd option (*Stratification by a map of predictions*) applying a k-means clustering (R package stats). 
 
-### Definition of some useful formulas
+To find the best number of strata (clusters) I applied an iterative approach, as suggested in Gruijter et al. 2016 but with a different selection criteria. Gruijter et al. 2016 determine the number of samples (n) that optimizes a "return on investment" by taking into account the cost of sampling. Here instead, the criteria is to find the design with the lowest n that still gives a 95% confidence at 15% of the mean. The approach from Gruijter et al. 2016 is somewhat more sophisticated (would require more time to implement) but also makes some assumptions that are critical (see discussion).
 
-**Sampling variance**  
-V(x_bar) = SUM(h=1 -> H) { (N_h / N)^2 S_h^2 / n_h }  
-x_bar: mean of x  
-H: number of strata  
-N_h: size (number of grid points) of stratum h  
-N: total size (sum of all strata)  
-S_h: standard deviation of x in stratum h  
-n_h: sample size allocated to stratum h  
+Specifically, for a given stratification level and n, an optimal allocation is found with:
 
-**Confidence Interval (CI)**  
-x_bar +- Z(S / sqrt(n))  
-Z: Z-value (= 1.96 for 95% CI)  
-or use t-scores for small sample sizes
+**Optimal allocation size for stratum h**  
+n'_h = n * (N_h * S_h) / (SUM{h=1 -> H} (N_h * S_h))
 
-**Optimal sample size for stratum h**
-n'_h = n * (N_h * S_h) / (SUM(h=1 -> H) {N_h * S_h})
+where N_h is the total grid point in stratum h, S_h is the standard deviation in stratum h, and H is the total strata.
 
-**Change in time in variable x**
-x_bar_delta = x_bar_t2 - x_bar_t1
-
-**Variance of estimated difference**
-V(x_bar_delta) = V(x_bar_t2 - x_bar_t1)  
-               = V(x_bar_t1) + V(x_bar_t2) - 2 * rho * sqrt( V(x_bar_t1) * V(x_bar_t2) )  
-Re-sampling at the same points is not recommended (Gruijter et al. 2016). With different points there is no temporal auto-correlation, so the term rho becomes zero:  
-V(x_bar_delta) = V(x_bar_t1) + V(x_bar_t2)  
-
+For each stratification, n is iteratively increased from a defined minimum, until the condition CI/mean < 0.15 is met. The stratification with the lowest n is selected as optimal.
 
 ## Step by step procedure
 
-### Area delimitation and subset relevant data
+Start by loaded all required packages
+```{r message=FALSE, warning=FALSE}
+library(rgdal)
+library(terra)
+library(raster)
+library(tidyverse)
+```
 
-The area of interest is the entire cropped surface of Iowa. To test the method, a subset of this area will be used and the method applied to the entire area when ready
+### Processing of geospatial data
 
-We first read in the data, subset and make some quick quality checks
+* The area of interest is the entire cropped surface of Iowa. A shape file of Iowa was thus obtained from: https://catalog.data.gov/dataset/tiger-line-shapefile-2016-state-iowa-current-county-subdivision-state-based  
+* To obtain a smaller crop map file, data was downloaded for Iowa 2020 from https://nassgeodata.gmu.edu/CropScape 
+* OCS mean and OCS 0.05 percentile data where downloaded from soilgrids using a Python script 
+
+This step checks the land use map values to determine what is crop and what not. It then writes out a new file.  
+(for code meaning, see https://www.nass.usda.gov/Research_and_Science/Cropland/metadata/metadata_ia20.htm).  
+Two plots are created: one showing all land use data and the next showing cropland against background.
+
 ```{r}
+# Set to false if output files already exist
+subset_crop <- FALSE
+download_ocs <- FALSE
 
+crop_file <- 'data/crop_mask/CDL_2020_19/CDL_2020_19.tif'
+crop <- rast(crop_file)
+plot(crop)
+if(subset_crop) {
+  # Subset cropped areas ---
+  
+  cr_vals <- terra::values(crop)
+  cr_uni <- terra::unique(cr_vals)
+  rm(cr_vals)
+  
+  # Codes for land use obtained from https://www.nass.usda.gov/Research_and_Science/Cropland/metadata/metadata_ia20.htm
+  notcrop <- c(0, 7, 8, 9, 15, 16, 17, 18, 19, 20, 40, 62, 63, 64, 65,
+               73, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+               91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103,
+               104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114,
+               115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 
+               126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136,
+               137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 
+               148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158,
+               159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 
+               170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180,
+               181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,
+               192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202,
+               203, 251, 252, 253, 255)
+  iscrop <- c(1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 21, 22, 23, 24, 25,
+              26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+              41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 
+              55, 56, 57, 58, 59, 60, 61, 66, 67, 68, 69, 70, 71, 72, 
+              74, 75, 76, 77, 204, 205, 206, 207, 208, 209, 210, 211, 
+              212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 
+              223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233,
+              234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 
+              245, 246, 247, 248, 249, 250, 254)
+  
+  cr_yes <- cr_uni[cr_uni %in% iscrop]
+  cr_no <- cr_uni[cr_uni %in% notcrop]
+  
+  # Set all non-crop values to NA
+  # crop[crop %in% cr_yes] <- 1
+  crop[crop %in% cr_no] <- 0
+  
+  # plot(crop)
+  terra::writeRaster(crop, 'data/workfiles/cropland-iowa.tif', overwrite=TRUE)
+} else {
+  cropfile <- 'data/workfiles/cropland-iowa.tif'
+  crop <- rast(cropfile)
+}
+plot(crop)
+```
+
+Here the Python script to download OSC data is called and the data is loaded. An Iowa shape file is loaded and reprojected to the required coordinate system, then used to crop the OSC data. The crop map data is resampled to fit the resolution of the OCS grid (from 30m to 250m) and then used to select (mask) the OSC data. The final data (organic carbon stocks for cropland in Iowa) is plotted (tC / ha).
+```{r message=FALSE, warning=FALSE}
+# To download data, call python script
+if (download_ocs) {
+system("/home/fernando/anaconda3/bin/python3 soilgrids_WCS-2.0-ocs_mean.py")
+system("/home/fernando/anaconda3/bin/python3 soilgrids_WCS-2.0-ocs_Q0.05.py")
+}
+
+# Read in the ocs mean and error data
+ocs_file <- 'data/workfiles/soilgrids_ocs_mean_iowa_approx.tif'
+ocs <- raster(ocs_file)
+names(ocs) <- "ocs_m"
+# GDALinfo(ocs_file)
+
+ocserr_file <- 'data/workfiles/soilgrids_ocs_Q0.05_iowa_approx.tif'
+ocserr <- raster(ocserr_file)
+names(ocserr) <- "ocs_err"
+# GDALinfo(ocserr_file)
+
+# Load shapefile and set projection
+# iowa_sh <- vect("data/shapefiles/tl_2016_19_cousub/tl_2016_19_cousub.shp")
+iowa_sh <- shapefile("data/shapefiles/tl_2016_19_cousub/tl_2016_19_cousub.shp")
+iowa_sh <- spTransform(iowa_sh, proj4string(ocs))  # Use same projections (coordinate system)
+
+# Crop data
+ocs <- rast(ocs)
+ocserr <- rast(ocserr)
+iowa_sh <- vect(iowa_sh)
+ocs <- terra::crop(ocs, iowa_sh)
+ocs <- terra::mask(ocs, iowa_sh)
+ocserr <- terra::crop(ocserr, iowa_sh)
+ocserr <- terra::mask(ocserr, iowa_sh)
+
+# Change the resolution to match ocs data and subset the ocs data using the crop mask
+crop2 <- terra::resample(crop, rast(ocs), method='near')
+# ocserr <- terra::resample(ocserr, rast(ocs), method='near')
+ocs <- terra::mask(x = ocs, mask = crop2, maskvalue=0)
+ocserr <- terra::mask(x = ocserr, mask = crop2, maskvalue=0)
+
+# check results
+plot(ocs)
+plot(ocserr)
+```
+
+The error standard deviation is derived from the 0.05 percentile and mean OCS data. The data is then written to file.
+```{r}
+# Lets convert 0.05 percentile to standard deviation assuming a normal distribution of the error:
+ocserr_sd <- (ocserr-ocs)/(-1.645)  #  -1.645 value of Z at 0.05 percentile
+
+# Fifth, we write out to file
+terra::writeRaster(ocs, 'data/workfiles/soilgrids_ocs_mean_iowa.tif', overwrite=TRUE)
+terra::writeRaster(ocserr_sd, 'data/workfiles/soilgrids_ocserr_sd_iowa.tif', overwrite=TRUE)
+```
+
+
+### The following section deals with the optimization procedure
+
+Several settings can be adjusted here. E.g. the input data files, confidence level required and minimum/maximum strata or samples.
+```{r}
+# Settings ======
+test_id     <- "test1"  # used for naming output files
+ocs_file    <- 'data/workfiles/soilgrids_ocs_mean_iowa.tif'
+ocserr_file <- 'data/workfiles/soilgrids_ocserr_sd_iowa.tif'
+use_prederr <- TRUE
+
+conf_lev   <- 0.95  # confidence level required
+max_cif    <- 0.15  # maximum allowed confidence interval as fraction of the mean
+n_mps      <- 3     # minimum number of sampling points allowed per strata
+min_H      <- 2     # minimum number of strata
+max_H      <- 10    # number of strata to test
+max_n      <- 1000  # maximum number of total samples
+sample_inc <- 1     # sample number increment per iteration. In case processing time becomes critical.
+
+```
+
+Several functions are defined here, mostly related to the main equations used.
+```{r}
+# Function definitions ========
+get_km_clust <- function(d, c) {
+  # Function returns a clustering based on k_means
+  # d: data to be clustered
+  # c: number of centriods (clusters)
+  set.seed(42)
+  kmeans(x = na.exclude(d), centers = c, iter.max = 500, nstart = 5) #, algorithm = "Lloyd")
+}
+
+get_stratstats <- function(df) {
+  df_out <- df %>%
+    group_by(stratum) %>%
+    summarize(stratum = mean(stratum), stratum_sd = sd(X), stratum_var = sd(X)^2,
+              stratum_size = length(X), stratum_errsd = mean(X_sd)) %>%
+    drop_na(stratum_sd)
+}
+
+get_sampvar <- function(H, N_H, N, S_H, n_H) {
+  # Function returns the sampling variance for a stratified design
+  # H: scalar for number of strata
+  # N_H: vector of stratum sizes (number of grid points)
+  # N: scalar for total grid points (sum of all strata) 
+  # S_H: vector of standard deviation of ocs by stratum
+  # n_H: vector of sample size allocated to each stratum
+  sampvar <- 0
+  for(i in 1:H) {
+    v_h <- (N_H[i]/N)^2 * (S_H[i])^2 / n_H[i]
+    sampvar <- sampvar+v_h
+  }
+  return(sampvar)
+}
+
+get_sampvar2 <- function(H, N_H, N, S_H, n_H) {
+  # Same as get_sampvar but with a finite population correction term (only important for small grids)
+  sampvar <- 0
+  for(i in 1:H) {
+    v_h <- (N_H[i]/N)^2 * ((N_H[i] - n_H[i]) / N_H[i]) * ((S_H[i])^2 / n_H[i])
+    sampvar <- sampvar+v_h
+  }
+  return(sampvar)
+}
+
+get_sampvar3 <- function(H, N_H, N, S_H, E_H, n_H) {
+  # Function returns the sampling variance for a stratified design
+  # H: scalar for number of strata
+  # N_H: vector of stratum sizes (number of grid points)
+  # N: scalar for total grid points (sum of all strata) 
+  # S_H: vector of standard deviation of ocs by stratum
+  # E_H: vector of mean standard deviation in ocs prediction error by stratum
+  # n_H: vector of sample size allocated to each stratum
+  sampvar <- 0
+  for(i in 1:H) {
+    v_h <- (N_H[i]/N)^2 * ((S_H[i])^2 + E_H[i]^2) / n_H[i]
+    sampvar <- sampvar+v_h
+  }
+  return(sampvar)
+}
+
+get_optsampalloc <- function(H, N_H, S_H, n_tot) {
+  # Optimal sample distribution (sizes) for all strata h n’_h = n * (N_h * S_h) / (SUM(h=1 -> H) {N_h * S_h})
+  # H: scalar for number of strata
+  # N_H: vector size H of size (total number of grid points) of stratum h
+  # S_H: vector size H of standard deviations for each stratum
+  
+  sum_sdn <- 0  # sum of standard deviations times number of samples
+  for(i in 1:H) {
+    x <- N_H[i] * S_H[i]
+    sum_sdn <- sum_sdn + x
+  }
+  opt_n <- rep(NA, length = H)  # vector to hold outputs
+  for(i in 1:H) {
+    opt_n[i] <- n_tot * (N_H[i] * S_H[i]) / sum_sdn
+  }
+  return(as.integer(round(opt_n)))
+}
+
+get_confint <- function(conf_lev, sampvar, n_tot) {
+  # Two-sided confidence interval calculation
+  t <- qt(1-(1-conf_lev)/2, n_tot-1)  # the t-score from students distribution
+  se <- sqrt(sampvar) / sqrt(n_tot) # standard error
+  ci <- t * se * 2  # Multiplied by 2 to get the full interval length
+}
+```
+
+The main optimization function.  
+This function iterates over the defined stratification levels and uses a while loop for number of samples to find the optimal value.
+A "best" combination is selected. Results returned include: 
+
+* stratification of all grid points for optimal design
+* samples numbers (density) for optimal design
+* statistics for all tested stratifications
+
+```{r}
+optim_sampling <- function(df_in, conf_lev, max_ci, n_mps, min_H, sample_inc) {
+  # This function obtains the minimum amount of total samples necessary to attain the value of max_ci
+  # It also returns the sampling density for each stratum 
+  # Returns a list containing: 
+  #   1. dataframe with grid values and optimized strata values
+  #   2. dataframe with strata numbers and optimized samples per strata
+  
+  # Working variables
+  H_all   <- tibble(nstrata=min_H:max_H, n_opt = NA, svar = NA, cif = NA, ci = NA)  # table holding output values
+  nH      <- NA  # Number of strata
+  n_tot   <- NA  # Number of total samples
+  ocs_avg <- mean(df_in$X, na.rm = TRUE)  # overall mean organic carbon stock
+  N_tot   <- sum(!is.na(df_in$X))  # N total number of grid points
+  H_levs  <- min_H:max_H  # stratification levels to test
+  
+  for(i in 1:length(H_levs)) {
+    
+    nH <- H_levs[i]
+    cat("Optimizing at stratification:", nH, "\n")
+    
+    # if(nH == 20) browser()  # debug line
+    
+    # Create strata
+    clust <- get_km_clust(d = df_in$X_raw, c = nH)
+    df_in$stratum[which(!is.na(df_in$X_raw))] <- as.integer(clust$cluster)
+    
+    # Get statistics for current stratification
+    H_stats <- get_stratstats(df_in)
+    
+    iter1 <- 1
+    # target_reached <- FALSE  # not used
+    
+    while(TRUE) {
+      
+      # Calculate the total sampling size
+      if(iter1==1) {n_tot <- n_mps * nH} else {n_tot <- n_tot + sample_inc}
+      
+      # print(n_tot)  # for debug
+      
+      # Stop if maximum allowed samples reached
+      if(n_tot > max_n) {
+        cat(paste0("Reached maximum number of allowed samples at stratification: ", nH, "\n"))
+        break
+      }
+      
+      # if(n_tot == 64 & nH == 6) browser()  # debug line
+      
+      # Get the optimal allocation
+      opt_n <- get_optsampalloc(H = nH, N_H = H_stats$stratum_size, S_H = H_stats$stratum_sd, n_tot = n_tot)
+      opt_n[opt_n < n_mps] <- n_mps  # if we don't get the minimum n per stratum, add where necessary
+      H_stats$opt_n <- opt_n
+      n_tot2 <- sum(H_stats$opt_n)  # recalculate to fix any difference after rounding
+      
+      # Get the overall sampling variance as a function of stratified sampling
+      if(use_prederr) {
+        samp_var <- get_sampvar3(H = nH, N_H = H_stats$stratum_size, N = N_tot, S_H = H_stats$stratum_sd,
+                                 E_H = H_stats$stratum_errsd, n_H = H_stats$opt_n)
+      } else {
+        samp_var <- get_sampvar(H = nH, N_H = H_stats$stratum_size, N = N_tot, S_H = H_stats$stratum_sd,
+                                n_H = H_stats$opt_n)  
+      }
+      
+      # Get confidence interval
+      ci <- get_confint(conf_lev = conf_lev, sampvar = samp_var, n_tot = n_tot2)
+      cif <- ci / ocs_avg
+      
+      # Check if cif is same or lower than the maximum allowed confidence interval
+      if(cif <= max_cif) {
+        # target_reached <- TRUE
+        H_all$n_opt[i] <- n_tot2
+        H_all$svar[i] <- samp_var
+        H_all$cif[i] <- cif * 100
+        H_all$ci[i] <- ci
+        break
+      }
+      
+      iter1 <- iter1+1
+      
+    }
+    
+    # if(target_reached) {} 
+    
+  }
+  
+  # First select strata with lowest n_opt
+  H_sel <- H_all[H_all$n_opt == min(H_all$n_opt, na.rm=TRUE),] 
+  # If more than one selected, take the case with more strata (err on the safe side)
+  H_best  <- H_sel[H_sel$nstrata == max(H_sel$nstrata, na.rm=TRUE),]
+  
+  # Recalculate clusters and sampling for the selected case ----- (deduplicate code?)
+  
+  # Create strata
+  clust <- get_km_clust(d = df_in$X, c = H_best$nstrata[1])
+  df_in$stratum[which(!is.na(df_in$X))] <- as.integer(clust$cluster)
+  
+  # Get statistics for best stratification
+  Hb_stats <- get_stratstats(df_in)
+  
+  # Get the optimal allocation
+  
+  opt_n <- get_optsampalloc(H = H_best$nstrata[1], N_H = Hb_stats$stratum_size, S_H = Hb_stats$stratum_sd, n_tot = H_best$n_opt[1])
+  opt_n[opt_n < n_mps] <- n_mps  # if we don't get the minimum n per stratum, add where necessary
+  Hb_stats$opt_n <- opt_n
+  
+  cat(" Confidence interval equal or less than the target (" ,  max_cif * 100, "% ) was found.\n")
+  cat(" CI = ", H_best$ci, "\n",
+      "CIrel = ", H_best$cif * 100, "%\n",
+      "Mean SOC stocks = ", ocs_avg, "\n",
+      "Total strata = ", H_best$nstrata, "\n",
+      "Total samples = ", H_best$n_opt, "\n",
+      "Samples per strata = ", Hb_stats$opt_n, "\n"
+  )
+  
+  return(list(Strata_out = df_in, Strata_stats = Hb_stats, Strata_all = H_all))
+  
+}
 ```
 
 
 
+##Discussion
 
+Re-sampling at the same points is not recommended by (Gruijter et al. 2016). With different points there is no temporal auto-correlation, so the term rho becomes zero:  
+V(x_bar_delta) = V(x_bar_t1) + V(x_bar_t2) 
+
+**Variance of estimated difference**
+V(x_bar_delta) = V(x_bar_t2 - x_bar_t1)  
+               = V(x_bar_t1) + V(x_bar_t2) - 2 * rho * sqrt( V(x_bar_t1) * V(x_bar_t2) )  
+
+
+## References 
+
+J.J. de Gruijter, A.B. McBratney, B. Minasny, I. Wheeler, B.P. Malone, U. Stockmann, Farm-scale soil carbon auditing, Geoderma, Volume 265, 2016, Pages 120-130
+
+J. J. De Gruijter, B. Minasny, A. B. Mcbratney, Optimizing Stratification and Allocation for Design-Based Estimation of Spatial Means Using Predictions with Error, Journal of Survey Statistics and Methodology, Volume 3, Issue 1, March 2015, Pages 19–42
 
